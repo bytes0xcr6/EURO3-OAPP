@@ -20,7 +20,10 @@ contract MintableTokenOwner is Ownable {
     /// @param _recipient address to mint
     /// @param _amount amount to be minted
     function mint(address _recipient, uint256 _amount) public {
-        require(minters[msg.sender], "MintableTokenOwner:mint: the sender must be in the minters list");
+        require(
+            minters[msg.sender],
+            "MintableTokenOwner:mint: the sender must be in the minters list"
+        );
         token.mint(_recipient, _amount);
     }
 

@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.19;
+pragma solidity 0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+// import "@openzeppelin/contracts/access/Ownable.sol";
 import {IMintableTokenOwner} from "../../interfaces/IMintableTokenOwner.sol";
 import {IMintableToken} from "../../interfaces/IMintableToken.sol";
 import "../../utils/LayerZero/LzApp.sol";
+import "hardhat/console.sol";
+
+import {OApp, Origin, MessagingFee} from "../../layerZero/oapp/contracts/oapp/OApp.sol";
 
 //* Chain Endpoints: https://docs.layerzero.network/contracts/endpoint-addresses
 
 // * CCIP Migrated to Layer Zero
-// Todo: Add estimation gas
-
-contract BridgeManagerLZ is Ownable, LzApp {
+contract BridgeManagerLZ is OApp {
     error NothingToWithdraw();
     error FailedToWithdrawEth(address owner, address target, uint256 value);
 
     event MintableOwnerUpdated(address newMintableOwner);
-    event ChainRouterUpdated(uint64 chainId, address bridgeManagerTo);
+    event ChainRouterUpdated(uint64 chainId, bool isAllowed);
     event MessageSent(
         address receiver,
         uint256 amount,
@@ -41,8 +42,8 @@ contract BridgeManagerLZ is Ownable, LzApp {
     mapping(address => mapping(uint64 => uint256)) public txNonce;
 
     struct destChain {
-        address bridgeManagerTo; // todo! Maybe not needed
-        uint16 endpointId;
+        bytes bridgeManager;
+        uint32 endpointId;
         bool allowed;
     }
 
@@ -52,7 +53,7 @@ contract BridgeManagerLZ is Ownable, LzApp {
         address _mintableToken,
         address _mintableOwner,
         address _endpoint // * It should be the router/entrypoint from Layer Zero
-    ) LzApp(_endpoint) {
+    ) OApp(_endpoint, _owner) {
         require(_owner != address(0), "invalid-owner-address");
         require(_mintableToken != address(0), "invalid-mintable-token-address");
         require(_mintableOwner != address(0), "invalid-mintable-owner-address");
@@ -64,7 +65,7 @@ contract BridgeManagerLZ is Ownable, LzApp {
     }
 
     // User approves to BridgeManager, signs Tx Off chain and then calls this method
-    function burn(
+    function bridge(
         uint256 _amount,
         uint64 _chainIdTo,
         bytes memory _signature
@@ -76,6 +77,7 @@ contract BridgeManagerLZ is Ownable, LzApp {
         MintableToken.burn(_amount);
 
         uint256 nonce = txNonce[msg.sender][_chainIdTo];
+
         require(
             verifySignature(
                 _amount,
@@ -83,7 +85,8 @@ contract BridgeManagerLZ is Ownable, LzApp {
                 _chainIdTo,
                 nonce,
                 _signature,
-                msg.sender
+                msg.sender,
+                destination.bridgeManager
             )
         );
         unchecked {
@@ -96,43 +99,64 @@ contract BridgeManagerLZ is Ownable, LzApp {
             _chainIdTo,
             nonce,
             msg.sender,
-            _signature
+            _signature,
+            destination.bridgeManager
         );
 
+        // todo! Looks like the option is not valid
+        // Todo: Calculate and add a real value, as if not, it won´t refund the gas fee on the other chain.
         //* send LayerZero message
+        bytes memory options = bytes(
+            "0x00030100110100000000000000000000000000030d40"
+        );
+
+        MessagingFee memory fee = _quote(
+            destination.endpointId,
+            payload,
+            options,
+            false
+        );
+        require(msg.value == fee.nativeFee, "not-enough-fee-paid");
+
         _lzSend(
-            destination.endpointId, // destination chainId
-            payload, // abi.encode()'ed bytes
-            payable(msg.sender), // (msg.sender will be this contract) refund address (LayerZero will refund any extra gas back to caller of send())
-            address(0),
-            bytes(""), // v1 adapterParams, specify custom destination gas qty
-            msg.value
+            destination.endpointId, // destination endpoint ID
+            payload, // Encoded message payload being sent.
+            options, // message execution options
+            fee, // v1 adapterParams, specify custom destination gas qty
+            payable(msg.sender) // (msg.sender will be this contract) refund address (LayerZero will refund any extra gas back to caller of send())
         );
 
         emit MessageSent(msg.sender, _amount, CHAIN_ID, _chainIdTo);
     }
 
     // * Logic to Receive
-    // Todo: It may should only be called by the endpoint LZ
-    // Todo: Maybe we don´t need to pass the chain ID
-    function _blockingLzReceive(
-        uint16 _srcChainId,
-        bytes memory _srcAddress,
-        uint64 _nonce,
-        bytes memory _payload
+    function _lzReceive(
+        Origin calldata _origin, // struct containing srcEid, sender address, and the message nonce
+        bytes32 _guid, // global message packet identifier
+        bytes calldata payload, // encoded message being received
+        address _executor, // the address of who executed the message
+        bytes calldata _extraData // appended executor data for the call
     ) internal override {
         uint256 amount; // Amount tokens
         uint64 chainIdFrom; // ChainId from
         uint64 chainIdTo; // ChainId from
         uint256 nonce; // Tx nonce
         address receiver; // Person to receive tokens
+        bytes memory bridgeManager; // destination bridgeManager
         bytes memory signature; // Signature
 
-        (amount, chainIdFrom, chainIdTo, nonce, receiver, signature) = abi
-            .decode(
-                _payload,
-                (uint256, uint64, uint64, uint256, address, bytes)
-            );
+        (
+            amount,
+            chainIdFrom,
+            chainIdTo,
+            nonce,
+            receiver,
+            signature,
+            bridgeManager
+        ) = abi.decode(
+            payload,
+            (uint256, uint64, uint64, uint256, address, bytes, bytes)
+        );
 
         // Verify signature
         require(txNonce[msg.sender][chainIdFrom] == nonce, "invalid-nonce");
@@ -144,10 +168,12 @@ contract BridgeManagerLZ is Ownable, LzApp {
                 chainIdTo,
                 nonce,
                 signature,
-                receiver
+                receiver,
+                bridgeManager
             ),
             "invalid-signature"
         );
+
         // Mint EURO3
         MintableOwner.mint(receiver, amount);
 
@@ -155,21 +181,21 @@ contract BridgeManagerLZ is Ownable, LzApp {
     }
 
     function updateDestChain(
+        bytes memory _bridgeManager,
         uint64 _chainIdTo,
-        address _bridgeManager,
-        uint16 _endpointId,
+        uint32 _endpointId,
         bool _allowed
     ) external onlyOwner {
         require(_chainIdTo != CHAIN_ID, "cannot-update-same-chain");
-        require(_bridgeManager != address(0), "invalid-bridgeManager-address");
-        //  todo: Add a check to not allow 0 value for endpointId
+        require(_bridgeManager.length > 0, "cannot-be-empty");
+
         destinationChain[_chainIdTo] = destChain({
-            bridgeManagerTo: _bridgeManager,
             endpointId: _endpointId,
-            allowed: _allowed
+            allowed: _allowed,
+            bridgeManager: _bridgeManager
         });
 
-        emit ChainRouterUpdated(_chainIdTo, _bridgeManager);
+        emit ChainRouterUpdated(_chainIdTo, _allowed);
     }
 
     function updateMintableTokenOwner(
@@ -185,10 +211,17 @@ contract BridgeManagerLZ is Ownable, LzApp {
         uint256 _amount,
         uint64 _chainIdFrom,
         uint64 _chainIdTo,
-        uint256 _nonce
+        uint256 _nonce,
+        bytes memory _bridgeManager // Destination bridgeManager
     ) public pure returns (bytes32) {
         bytes32 messageHash = keccak256(
-            abi.encode(_amount, _chainIdFrom, _chainIdTo, _nonce)
+            abi.encode(
+                _amount,
+                _chainIdFrom,
+                _chainIdTo,
+                _nonce,
+                _bridgeManager
+            )
         );
         return messageHash;
     }
@@ -199,16 +232,19 @@ contract BridgeManagerLZ is Ownable, LzApp {
         uint64 _chainIdTo,
         uint256 _nonce,
         bytes memory _signature,
-        address _sender
+        address _sender,
+        bytes memory _bridgeManager
     ) public pure returns (bool) {
         bytes32 messageHash = getMessageHash(
             _amount,
             _chainIdFrom,
             _chainIdTo,
-            _nonce
+            _nonce,
+            _bridgeManager
         );
         bytes32 ethSignedMessageHash = getEthSignedMessageHash(messageHash);
         address signer = recoverSigner(ethSignedMessageHash, _signature);
+
         return signer == _sender;
     }
 
@@ -243,42 +279,35 @@ contract BridgeManagerLZ is Ownable, LzApp {
         }
     }
 
+    function quote(
+        uint256 _amount,
+        uint64 _chainIdTo,
+        bytes memory _signature,
+        bytes memory _options,
+        address sender
+    ) public view returns (uint256 nativeFee, uint256 lzTokenFee) {
+        destChain memory destination = destinationChain[_chainIdTo];
+        require(destination.allowed, "invalid-chain-id-to");
+        uint256 nonce = txNonce[sender][_chainIdTo];
+
+        bytes memory payload = abi.encode(
+            _amount,
+            CHAIN_ID,
+            _chainIdTo,
+            nonce,
+            sender,
+            _signature,
+            destination.bridgeManager
+        );
+
+        MessagingFee memory fee = _quote(
+            destination.endpointId,
+            payload,
+            _options,
+            false
+        );
+        return (fee.nativeFee, fee.lzTokenFee);
+    }
+
     receive() external payable {}
 }
-
-// contract BridgeManager_ is LzApp {
-//     constructor(address _endpoint) LzApp(_endpoint) {}
-
-//     uint256 number;
-
-//     /**
-//      * @dev Store value in variable & sends num crosschain
-//      * @param num value to store
-//      */
-//     function store(uint256 num, uint64 dstChainId) public payable {
-//         bytes memory payload = abi.encodePacked(num);
-//         _lzSend(dstChainId, payload, payable(msg.sender), address(0), bytes(""), msg.value);
-//         number = num;
-//     }
-
-//     /**
-//      * @dev Crosschain receiver
-//      */
-//     function _blockingLzReceive(
-//         uint64 _srcChainId,
-//         bytes memory _srcAddress,
-//         uint64 _nonce,
-//         bytes memory _payload
-//     ) internal override {
-//         uint256 num = abi.decode(_payload, (uint256));
-//         number = num;
-//     }
-
-//     /**
-//      * @dev Return value
-//      * @return value of 'number'
-//      */
-//     function retrieve() public view returns (uint256) {
-//         return number;
-//     }
-// }

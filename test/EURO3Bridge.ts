@@ -1,103 +1,117 @@
-import { MintableToken } from "./../typechain-types/contracts/MintableToken";
+import { BridgeManagerLZ } from "./../typechain-types/contracts/cross-chain/layerzero/BridgeManagerLZ";
 import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { ethers } from "hardhat";
 import { getMessageHash } from "../scripts/utils/getMessageHash";
 
-const ccipData = {
+const chainData = {
   mumbai: {
     chainId: "80001",
-    bridgeManager: "0x6646805214327e5fa3bcA3E9ebd90F2d1198e075",
-    EURO3: "0x476E079929215561B5c90E0Fae6a92F3384da59A",
-    router: "0x1035CabC275068e0F4b745A29CEDf38E13aF41b1",
-    mintableOwner: "0xA8FAA3DA0B6d8393e8F8A405A9a9FD363560aE61",
-    chainSelector: "12532609583862916517",
-    LINK: "0x326c977e6efc84e512bb9c30f76e30c160ed06fb",
-    // rpc: 'https://rpc-mumbai.maticvigil.com',
+    endpoint: "0x6edce65403992e310a62460808c4b910d972f10f",
+    endpointId: "40109", // *  https://docs.layerzero.network/contracts/endpoint-addresses
   },
-  bnbTest: {
-    chainId: "97",
-    bridgeManager: "0x6646805214327e5fa3bcA3E9ebd90F2d1198e075",
-    EURO3: "0x476E079929215561B5c90E0Fae6a92F3384da59A",
-    router: "0xE1053aE1857476f36A3C62580FF9b016E8EE8F6f",
-    mintableOwner: "0xA8FAA3DA0B6d8393e8F8A405A9a9FD363560aE61",
-    chainSelector: "13264668187771770619",
-    LINK: "0x84b9B910527Ad5C03A9Ca831909E21e236EA7b06",
-    // rpc: 'https://data-seed-prebsc-1-s1.binance.org:8545/',
+  arbitrum_sepolia: {
+    chainId: "421614",
+    endpoint: "0x6edce65403992e310a62460808c4b910d972f10f",
+    endpointId: "40231", // * https://docs.layerzero.network/contracts/endpoint-addresses
   },
 };
 
 describe("EURO3Bridge_MockUp", function () {
   async function config() {
     const [deployer] = await ethers.getSigners();
+    console.log("Deployer: ", deployer.address);
 
-    const MintableToken = await ethers.getContractFactory(
-      "MintableToken",
-      deployer
-    );
+    const chainDataFrom = chainData.mumbai;
+    const chainDataTo = chainData.arbitrum_sepolia;
+    const EURO3 = await ethers.getContractFactory("MintableToken", deployer);
+    const stable = await EURO3.deploy("EURO3", "EURO3");
 
-    const stable = await MintableToken.deploy("EURO3", "EUR3");
-
-    const MintableTokenOwner = await ethers.getContractFactory(
+    const MintableOwner = await ethers.getContractFactory(
       "MintableTokenOwner",
       deployer
     );
-    const mintableTokenOwner = await MintableTokenOwner.deploy(
-      await stable.getAddress()
-    );
+    const mintableOwner = await MintableOwner.deploy(stable.target);
+    await mintableOwner.waitForDeployment();
+
+    await stable.transferOwnership(mintableOwner.target);
 
     const BridgeManager = await ethers.getContractFactory(
-      "BridgeManagerCCIP_MockUp",
+      "BridgeManagerLZ",
       deployer
     );
     const bridgeManager = await BridgeManager.deploy(
-      ccipData.mumbai.chainId,
+      chainDataFrom.chainId,
       deployer.address,
-      await stable.getAddress(),
-      await mintableTokenOwner.getAddress(),
-      ccipData.mumbai.LINK,
-      ccipData.mumbai.router
+      stable.target,
+      mintableOwner.target,
+      chainDataFrom.endpoint
     );
-    console.log("bridgeManager: ", await bridgeManager.getAddress());
 
-    const testingAddress = ["0x6646805214327e5fa3bcA3E9ebd90F2d1198e075"];
+    const testingAddress = "0x6646805214327e5fa3bcA3E9ebd90F2d1198e075";
+    const bridgeDestBytes32 = ethers.zeroPadValue(testingAddress, 32);
+    console.log({ bridgeDestBytes32 });
     await bridgeManager.updateDestChain(
-      ccipData.bnbTest.chainId,
-      testingAddress[0],
-      0,
+      bridgeDestBytes32,
+      chainDataTo.chainId,
+      chainDataTo.endpointId,
       true
     );
+    await bridgeManager.setPeer(chainDataTo.endpointId, bridgeDestBytes32);
 
-    return { bridgeManager, mintableTokenOwner, stable, deployer };
+    const amount = ethers.parseUnits("1", "ether");
+    await mintableOwner.addMinter(deployer.address);
+    await mintableOwner.mint(deployer.address, amount);
+    await stable.approve(bridgeManager.target, amount);
+
+    return {
+      bridgeManager,
+      mintableOwner,
+      stable,
+      deployer,
+      chainDataFrom,
+      chainDataTo,
+      bridgeDestBytes32,
+    };
   }
 
   describe("testing", async () => {
     it("Should burn/mint EURO3 and verify Signature", async function () {
-      const { bridgeManager, mintableTokenOwner, stable, deployer } =
-        await loadFixture(config);
+      const {
+        bridgeManager,
+        mintableOwner,
+        stable,
+        deployer,
+        chainDataFrom,
+        chainDataTo,
+        bridgeDestBytes32,
+      } = await loadFixture(config);
       const amount = ethers.parseUnits("1", "ether");
-      const chainFrom = ccipData.mumbai.chainId;
-      const chainTo = ccipData.bnbTest.chainId;
+
       const nonce = await bridgeManager.txNonce(
-        await deployer.getAddress(),
-        chainTo
+        deployer.address,
+        chainDataTo.chainId
       );
-      const gasLimit = "200000";
+
+      const BridgeManagerLZ_dest = "0xae92d5aD7583AD66E49A0c67BAd18F6ba52dDDc1"; // Example
+
       const hashedMessage = getMessageHash(
         amount.toString(),
-        chainFrom,
-        chainTo,
-        nonce.toString()
+        chainDataFrom.chainId,
+        chainDataTo.chainId,
+        nonce.toString(),
+        bridgeDestBytes32
       );
 
       let signature = await deployer.signMessage(hashedMessage);
 
       let isVerified = await bridgeManager.verifySignature(
         amount.toString(),
-        chainFrom,
-        chainTo,
+        chainDataFrom.chainId,
+        chainDataTo.chainId,
         nonce.toString(),
         signature,
-        deployer.address
+        deployer.address,
+        bridgeDestBytes32
       );
 
       console.log({ isVerified });
@@ -106,19 +120,34 @@ describe("EURO3Bridge_MockUp", function () {
         return;
       }
 
-      // todo: send EURO3/stable to the deployer address,
-      await mintableTokenOwner
-        .connect(deployer)
-        .mint(await deployer.getAddress(), amount);
-      await stable.approve(await bridgeManager.getAddress(), amount);
-      await bridgeManager.burn(
-        amount,
-        chainTo,
-        signature,
-        ccipData.mumbai.LINK,
-        gasLimit
+      const peer = await bridgeManager.peers(chainDataTo.endpointId);
+      console.log({ peer });
+
+      const chainData = await bridgeManager.destinationChain(
+        chainDataTo.chainId
       );
-      // * Then _ccipReceive should be called by Chainlink and it ill mint the EURO3 with the signed data
+      console.log({ chainData });
+
+      const gasCalculation = await bridgeManager.quote(
+        amount,
+        chainDataTo.chainId,
+        signature,
+        "0x00030100110100000000000000000000000000030d40",
+        deployer.address
+      );
+      console.log({ gasCalculation });
+
+      const valueToSend = Number(gasCalculation[0]);
+      console.log({ valueToSend });
+
+      const bridge = await bridgeManager.bridge(
+        amount,
+        chainDataTo.chainId,
+        signature,
+        { value: valueToSend.toString() }
+      );
+
+      console.log(bridge);
     });
   });
 });
