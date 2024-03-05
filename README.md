@@ -133,9 +133,3 @@ Contributions to the **BridgeManagerLZ** project are welcome! Please follow the 
 This project is licensed under the [BUSL-1.1 License](LICENSE).
 
 ---
-
-Feel free to customize this README according to your project's specific details.
-
-```
-
-```
