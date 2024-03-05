@@ -19,13 +19,14 @@ export async function getSignature(
   );
 
   const nonce = await BridgeManager.txNonce(signer.address, chainTo.chainId);
+  const bridgeDestBytes32 = ethers.zeroPadValue(chainTo.BridgeManagerLZ, 32);
 
   const hashedMessage = getMessageHash(
     amount.toString(),
     chainFrom.chainId,
     chainTo.chainId,
     nonce.toString(),
-    chainTo.BridgeManagerLZ
+    bridgeDestBytes32
   );
 
   const signature = await signer.signMessage(hashedMessage);
@@ -38,7 +39,7 @@ export async function getSignature(
     nonce,
     signature,
     signer.address,
-    chainTo.BridgeManagerLZ
+    bridgeDestBytes32
   );
   console.log("Signature Verification Result:", result);
 

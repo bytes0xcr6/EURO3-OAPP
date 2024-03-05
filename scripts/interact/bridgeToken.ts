@@ -4,6 +4,7 @@ export async function bridgeToken(
   chainFrom: any,
   chainTo: any,
   amount: string,
+  options: string,
   signature: string
 ) {
   console.log(
@@ -25,30 +26,29 @@ export async function bridgeToken(
     signer
   );
 
-  console.log({
-    amount,
-    chainIdTo: chainTo.chainId,
-    signature,
-    // gasCalculation: Number(gasCalculation),
-  });
+  const approval = await EURO3.approve(BridgeManager.target, amount);
+  await approval.wait();
+
+  console.log("Approved to bridge to manage EURO3");
 
   const gasCalculation = await BridgeManager.quote(
     amount,
     chainTo.chainId,
     signature,
-    "0x",
+    options,
     signer.address
   );
+  console.log({ gasCalculation });
 
-  const approval = await EURO3.approve(BridgeManager.target, amount);
-  await approval.wait();
-  console.log("Approved to bridge to manage EURO3");
-
+  console.log(amount, chainTo.chainId, options, signature, {
+    value: gasCalculation[0],
+  });
   const bridge = await BridgeManager.bridge(
     amount,
     chainTo.chainId,
+    options,
     signature,
-    { value: Number(gasCalculation) }
+    { value: gasCalculation[0] }
   );
 
   await bridge.wait();

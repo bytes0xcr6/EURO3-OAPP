@@ -49,13 +49,12 @@ export async function deployAndSet(chain: any) {
 
   const addMinter1 = await mintableOwner.addMinter(bridgeManager.target);
   await addMinter1.wait();
+  const addMinter2 = await mintableOwner.addMinter(signer.address);
+  await addMinter2.wait();
 
   console.log("Testing flow...");
   //   FOR TESTING - Remove after testing
   const amount = ethers.parseUnits("100000", "ether");
-  const addMinter2 = await mintableOwner.addMinter(signer.address);
-  await addMinter2.wait();
-
   const minting = await mintableOwner.mint(signer.address, amount);
   await minting.wait();
 

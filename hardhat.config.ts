@@ -11,6 +11,7 @@ const config: HardhatUserConfig = {
       chainId: 1337,
       forking: {
         url: process.env.RPC_PROVIDER_MUMBAI!,
+        // url: "http://127.0.0.1:8545/",
       },
     },
     buildbear_eth: {

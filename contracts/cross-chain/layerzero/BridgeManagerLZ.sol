@@ -1,18 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.20;
 
-// import "@openzeppelin/contracts/access/Ownable.sol";
 import {IMintableTokenOwner} from "../../interfaces/IMintableTokenOwner.sol";
 import {IMintableToken} from "../../interfaces/IMintableToken.sol";
-import "../../utils/LayerZero/LzApp.sol";
-import "hardhat/console.sol";
+import {OApp, Origin, MessagingFee, MessagingReceipt} from "../../layerZero/oapp/contracts/oapp/OApp.sol";
 
-import {OApp, Origin, MessagingFee} from "../../layerZero/oapp/contracts/oapp/OApp.sol";
-
-//* Chain Endpoints: https://docs.layerzero.network/contracts/endpoint-addresses
-
-// * CCIP Migrated to Layer Zero
 contract BridgeManagerLZ is OApp {
+    // using OptionsBuilder for bytes;
+
     error NothingToWithdraw();
     error FailedToWithdrawEth(address owner, address target, uint256 value);
 
@@ -68,8 +63,9 @@ contract BridgeManagerLZ is OApp {
     function bridge(
         uint256 _amount,
         uint64 _chainIdTo,
+        bytes memory _options,
         bytes memory _signature
-    ) external payable {
+    ) external payable returns (MessagingReceipt memory) {
         require(_chainIdTo != CHAIN_ID, "cannot-burn-on-same-chain");
         destChain memory destination = destinationChain[_chainIdTo];
         require(destination.allowed, "invalid-chain");
@@ -78,17 +74,16 @@ contract BridgeManagerLZ is OApp {
 
         uint256 nonce = txNonce[msg.sender][_chainIdTo];
 
-        require(
-            verifySignature(
-                _amount,
-                CHAIN_ID,
-                _chainIdTo,
-                nonce,
-                _signature,
-                msg.sender,
-                destination.bridgeManager
-            )
+        verifySignature(
+            _amount,
+            CHAIN_ID,
+            _chainIdTo,
+            nonce,
+            _signature,
+            msg.sender,
+            destination.bridgeManager
         );
+
         unchecked {
             txNonce[msg.sender][_chainIdTo]++;
         }
@@ -103,30 +98,25 @@ contract BridgeManagerLZ is OApp {
             destination.bridgeManager
         );
 
-        // todo! Looks like the option is not valid
-        // Todo: Calculate and add a real value, as if not, it won´t refund the gas fee on the other chain.
-        //* send LayerZero message
-        bytes memory options = bytes(
-            "0x00030100110100000000000000000000000000030d40"
-        );
-
         MessagingFee memory fee = _quote(
             destination.endpointId,
             payload,
-            options,
+            _options,
             false
         );
-        require(msg.value == fee.nativeFee, "not-enough-fee-paid");
 
-        _lzSend(
+        //* send LayerZero message
+        MessagingReceipt memory receipt = _lzSend(
             destination.endpointId, // destination endpoint ID
             payload, // Encoded message payload being sent.
-            options, // message execution options
+            _options, // message execution options
             fee, // v1 adapterParams, specify custom destination gas qty
             payable(msg.sender) // (msg.sender will be this contract) refund address (LayerZero will refund any extra gas back to caller of send())
         );
 
         emit MessageSent(msg.sender, _amount, CHAIN_ID, _chainIdTo);
+
+        return receipt;
     }
 
     // * Logic to Receive
@@ -161,20 +151,17 @@ contract BridgeManagerLZ is OApp {
         // Verify signature
         require(txNonce[msg.sender][chainIdFrom] == nonce, "invalid-nonce");
         txNonce[msg.sender][chainIdFrom]++;
-        require(
-            verifySignature(
-                amount,
-                chainIdFrom,
-                chainIdTo,
-                nonce,
-                signature,
-                receiver,
-                bridgeManager
-            ),
-            "invalid-signature"
+
+        verifySignature(
+            amount,
+            chainIdFrom,
+            chainIdTo,
+            nonce,
+            signature,
+            receiver,
+            bridgeManager
         );
 
-        // Mint EURO3
         MintableOwner.mint(receiver, amount);
 
         emit MessageReceived(msg.sender, amount, chainIdFrom, chainIdTo);
@@ -198,6 +185,36 @@ contract BridgeManagerLZ is OApp {
         emit ChainRouterUpdated(_chainIdTo, _allowed);
     }
 
+    function quote(
+        uint256 _amount,
+        uint64 _chainIdTo,
+        bytes memory _signature,
+        bytes memory _options,
+        address sender
+    ) public view returns (uint256 nativeFee, uint256 lzTokenFee) {
+        destChain memory destination = destinationChain[_chainIdTo];
+        require(destination.allowed, "invalid-chain-id-to");
+        uint256 nonce = txNonce[sender][_chainIdTo];
+
+        bytes memory payload = abi.encode(
+            _amount,
+            CHAIN_ID,
+            _chainIdTo,
+            nonce,
+            sender,
+            _signature,
+            destination.bridgeManager
+        );
+
+        MessagingFee memory fee = _quote(
+            destination.endpointId,
+            payload,
+            _options,
+            false
+        );
+        return (fee.nativeFee, fee.lzTokenFee);
+    }
+
     function updateMintableTokenOwner(
         address _mintableOwner
     ) external onlyOwner {
@@ -206,13 +223,13 @@ contract BridgeManagerLZ is OApp {
         emit MintableOwnerUpdated(_mintableOwner);
     }
 
-    // Signature verification loggic
+    // Signature management
     function getMessageHash(
         uint256 _amount,
         uint64 _chainIdFrom,
         uint64 _chainIdTo,
         uint256 _nonce,
-        bytes memory _bridgeManager // Destination bridgeManager
+        bytes memory _bridgeManagerDest // Destination bridgeManager
     ) public pure returns (bytes32) {
         bytes32 messageHash = keccak256(
             abi.encode(
@@ -220,7 +237,7 @@ contract BridgeManagerLZ is OApp {
                 _chainIdFrom,
                 _chainIdTo,
                 _nonce,
-                _bridgeManager
+                _bridgeManagerDest
             )
         );
         return messageHash;
@@ -233,19 +250,19 @@ contract BridgeManagerLZ is OApp {
         uint256 _nonce,
         bytes memory _signature,
         address _sender,
-        bytes memory _bridgeManager
+        bytes memory _bridgeManagerDest
     ) public pure returns (bool) {
         bytes32 messageHash = getMessageHash(
             _amount,
             _chainIdFrom,
             _chainIdTo,
             _nonce,
-            _bridgeManager
+            _bridgeManagerDest
         );
         bytes32 ethSignedMessageHash = getEthSignedMessageHash(messageHash);
         address signer = recoverSigner(ethSignedMessageHash, _signature);
-
-        return signer == _sender;
+        require(signer == _sender, "invalid-signature");
+        return true;
     }
 
     function getEthSignedMessageHash(
@@ -277,36 +294,6 @@ contract BridgeManagerLZ is OApp {
             s := mload(add(_signature, 64))
             v := byte(0, mload(add(_signature, 96)))
         }
-    }
-
-    function quote(
-        uint256 _amount,
-        uint64 _chainIdTo,
-        bytes memory _signature,
-        bytes memory _options,
-        address sender
-    ) public view returns (uint256 nativeFee, uint256 lzTokenFee) {
-        destChain memory destination = destinationChain[_chainIdTo];
-        require(destination.allowed, "invalid-chain-id-to");
-        uint256 nonce = txNonce[sender][_chainIdTo];
-
-        bytes memory payload = abi.encode(
-            _amount,
-            CHAIN_ID,
-            _chainIdTo,
-            nonce,
-            sender,
-            _signature,
-            destination.bridgeManager
-        );
-
-        MessagingFee memory fee = _quote(
-            destination.endpointId,
-            payload,
-            _options,
-            false
-        );
-        return (fee.nativeFee, fee.lzTokenFee);
     }
 
     receive() external payable {}

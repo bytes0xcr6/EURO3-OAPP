@@ -18,6 +18,7 @@
     "@chainlink/contracts": "^0.8.0",
     "@chainlink/contracts-ccip": "^1.2.1",
     "@layerzerolabs/lz-evm-oapp-v2": "^2.1.13",
+    "@layerzerolabs/lz-v2-utilities": "^2.1.13",
     "@openzeppelin/contracts": "^4.9.0",
     "dotenv": "^16.4.5",
     "hardhat-tracer": "^2.8.1"
