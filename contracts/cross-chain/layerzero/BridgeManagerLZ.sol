@@ -1,16 +1,22 @@
 // SPDX-License-Identifier: BUSL-1.1
-pragma solidity 0.8.20;
+pragma solidity 0.8.24;
 
+// Importing interfaces and external contracts
 import {IMintableTokenOwner} from "../../interfaces/IMintableTokenOwner.sol";
 import {IMintableToken} from "../../interfaces/IMintableToken.sol";
 import {OApp, Origin, MessagingFee, MessagingReceipt} from "../../layerZero/oapp/contracts/oapp/OApp.sol";
 
+/**
+ * @title BridgeManagerLZ
+ * @dev Manages the bridging of tokens between different chains using LayerZero messaging
+ * @author 3A DAO - Cristian Richarte 0xCR6
+ */
 contract BridgeManagerLZ is OApp {
-    // using OptionsBuilder for bytes;
-
+    // Custom errors to be used in the contract
     error NothingToWithdraw();
     error FailedToWithdrawEth(address owner, address target, uint256 value);
 
+    // Events for important contract state changes
     event MintableOwnerUpdated(address newMintableOwner);
     event ChainRouterUpdated(uint64 chainId, bool isAllowed);
     event MessageSent(
@@ -27,21 +33,34 @@ contract BridgeManagerLZ is OApp {
     );
     event RouterUpdated(address newRouter);
 
+    // Immutable variables
     uint64 public immutable CHAIN_ID; // chainId where the contract is deployed
     string public constant VERSION = "1.0.0";
 
+    // Contract interfaces
     IMintableToken public immutable MintableToken; // EURO3
     IMintableTokenOwner public MintableOwner; // Proxy to mint more EURO3
 
+    // Destination chain information mapping
     mapping(uint64 => destChain) public destinationChain;
+    // Transaction nonce mapping for each user and destination chain
     mapping(address => mapping(uint64 => uint256)) public txNonce;
 
+    // Struct to hold destination chain information
     struct destChain {
         bytes bridgeManager;
         uint32 endpointId;
         bool allowed;
     }
 
+    /**
+     * @dev Contract constructor
+     * @param _chainId Chain ID where the contract is deployed
+     * @param _owner Owner's address
+     * @param _mintableToken Address of the mintable token (EURO3)
+     * @param _mintableOwner Address of the mintable token owner (Proxy)
+     * @param _endpoint Address of the router/entrypoint from Layer Zero
+     */
     constructor(
         uint64 _chainId,
         address _owner,
@@ -59,7 +78,14 @@ contract BridgeManagerLZ is OApp {
         MintableToken = IMintableToken(_mintableToken);
     }
 
-    // User approves to BridgeManager, signs Tx Off chain and then calls this method
+    /**
+     * @dev User approves to BridgeManager, signs Tx Off chain, and then calls this method
+     * @param _amount Amount of tokens to be bridged
+     * @param _chainIdTo Destination chain ID
+     * @param _options Additional options for messaging
+     * @param _signature User's signature for the transaction
+     * @return receipt Result of the LayerZero messaging
+     */
     function bridge(
         uint256 _amount,
         uint64 _chainIdTo,
@@ -119,20 +145,27 @@ contract BridgeManagerLZ is OApp {
         return receipt;
     }
 
-    // * Logic to Receive
+    /**
+     * @dev Handles the logic to receive bridged tokens on the Layer Zero protocol
+     * @param _origin Struct containing srcEid, sender address, and the message nonce
+     * @param _guid Global message packet identifier
+     * @param payload Encoded message being received
+     * @param _executor The address of the entity executing the message
+     * @param _extraData Appended executor data for the call
+     */
     function _lzReceive(
-        Origin calldata _origin, // struct containing srcEid, sender address, and the message nonce
-        bytes32 _guid, // global message packet identifier
-        bytes calldata payload, // encoded message being received
-        address _executor, // the address of who executed the message
-        bytes calldata _extraData // appended executor data for the call
+        Origin calldata _origin,
+        bytes32 _guid,
+        bytes calldata payload,
+        address _executor,
+        bytes calldata _extraData
     ) internal override {
         uint256 amount; // Amount tokens
         uint64 chainIdFrom; // ChainId from
         uint64 chainIdTo; // ChainId from
         uint256 nonce; // Tx nonce
         address receiver; // Person to receive tokens
-        bytes memory bridgeManager; // destination bridgeManager
+        bytes memory bridgeManager; // Destination bridgeManager
         bytes memory signature; // Signature
 
         (
@@ -162,11 +195,20 @@ contract BridgeManagerLZ is OApp {
             bridgeManager
         );
 
+        // Mint tokens to the receiver
         MintableOwner.mint(receiver, amount);
 
+        // Emit the MessageReceived event
         emit MessageReceived(msg.sender, amount, chainIdFrom, chainIdTo);
     }
 
+    /**
+     * @dev Updates destination chain information
+     * @param _bridgeManager Address of the destination bridgeManager
+     * @param _chainIdTo Destination chain ID
+     * @param _endpointId Destination endpoint ID
+     * @param _allowed Whether the destination chain is allowed or not
+     */
     function updateDestChain(
         bytes memory _bridgeManager,
         uint64 _chainIdTo,
@@ -185,6 +227,16 @@ contract BridgeManagerLZ is OApp {
         emit ChainRouterUpdated(_chainIdTo, _allowed);
     }
 
+    /**
+     * @dev Returns the native and LZToken fees for a given transaction
+     * @param _amount Amount of tokens to be bridged
+     * @param _chainIdTo Destination chain ID
+     * @param _signature User's signature for the transaction
+     * @param _options Additional options for messaging
+     * @param sender The address of the transaction sender
+     * @return nativeFee Native fee in the destination chain's native token
+     * @return lzTokenFee Fee in LZToken for the transaction
+     */
     function quote(
         uint256 _amount,
         uint64 _chainIdTo,
@@ -215,6 +267,10 @@ contract BridgeManagerLZ is OApp {
         return (fee.nativeFee, fee.lzTokenFee);
     }
 
+    /**
+     * @dev Updates the address of the MintableTokenOwner
+     * @param _mintableOwner Address of the new MintableTokenOwner
+     */
     function updateMintableTokenOwner(
         address _mintableOwner
     ) external onlyOwner {
@@ -223,13 +279,21 @@ contract BridgeManagerLZ is OApp {
         emit MintableOwnerUpdated(_mintableOwner);
     }
 
-    // Signature management
+    /**
+     * @dev Computes the message hash for signature verification
+     * @param _amount Amount of tokens to be bridged
+     * @param _chainIdFrom Source chain ID
+     * @param _chainIdTo Destination chain ID
+     * @param _nonce Transaction nonce
+     * @param _bridgeManagerDest Address of the destination bridgeManager
+     * @return messageHash Computed message hash
+     */
     function getMessageHash(
         uint256 _amount,
         uint64 _chainIdFrom,
         uint64 _chainIdTo,
         uint256 _nonce,
-        bytes memory _bridgeManagerDest // Destination bridgeManager
+        bytes memory _bridgeManagerDest
     ) public pure returns (bytes32) {
         bytes32 messageHash = keccak256(
             abi.encode(
@@ -243,6 +307,17 @@ contract BridgeManagerLZ is OApp {
         return messageHash;
     }
 
+    /**
+     * @dev Verifies the signature of a message
+     * @param _amount Amount of tokens to be bridged
+     * @param _chainIdFrom Source chain ID
+     * @param _chainIdTo Destination chain ID
+     * @param _nonce Transaction nonce
+     * @param _signature User's signature for the transaction
+     * @param _sender Address of the transaction sender
+     * @param _bridgeManagerDest Address of the destination bridgeManager
+     * @return True if the signature is valid, otherwise reverts
+     */
     function verifySignature(
         uint256 _amount,
         uint64 _chainIdFrom,
@@ -265,18 +340,26 @@ contract BridgeManagerLZ is OApp {
         return true;
     }
 
+    /**
+     * @dev Computes the Ethereum signed message hash
+     * @param _messageHash Computed message hash
+     * @return ethSignedMessageHash Computed Ethereum signed message hash
+     */
     function getEthSignedMessageHash(
         bytes32 _messageHash
-    ) internal pure returns (bytes32) {
-        return
-            keccak256(
-                abi.encodePacked(
-                    "\x19Ethereum Signed Message:\n32",
-                    _messageHash
-                )
-            );
+    ) internal pure returns (bytes32 ethSignedMessageHash) {
+        ethSignedMessageHash = keccak256(
+            abi.encodePacked("\x19Ethereum Signed Message:\n32", _messageHash)
+        );
+        return ethSignedMessageHash;
     }
 
+    /**
+     * @dev Recovers the signer from a signature
+     * @param _ethSignedMessageHash Computed Ethereum signed message hash
+     * @param _signature Signature of the message
+     * @return Address of the signer
+     */
     function recoverSigner(
         bytes32 _ethSignedMessageHash,
         bytes memory _signature
@@ -285,6 +368,13 @@ contract BridgeManagerLZ is OApp {
         return ecrecover(_ethSignedMessageHash, v, r, s);
     }
 
+    /**
+     * @dev Splits a signature into its components
+     * @param _signature Signature to be split
+     * @return r Component r of the signature
+     * @return s Component s of the signature
+     * @return v Component v of the signature
+     */
     function splitSignature(
         bytes memory _signature
     ) internal pure returns (bytes32 r, bytes32 s, uint8 v) {
@@ -296,5 +386,8 @@ contract BridgeManagerLZ is OApp {
         }
     }
 
+    /**
+     * @dev Fallback function to accept Native
+     */
     receive() external payable {}
 }
