@@ -29,11 +29,17 @@ const config: HardhatUserConfig = {
     mumbai: {
       url: process.env.RPC_PROVIDER_MUMBAI,
       accounts: [process.env.PRIVATE_KEY!],
-      chainId: 80001,
+      chainId: Number(process.env.CHAIN_ID_MUMBAI)!,
     },
     arbitrum_sepolia: {
       url: process.env.RPC_PROVIDER_TESTNET_ARBITRUM!,
       accounts: [process.env.PRIVATE_KEY!],
+      chainId: Number(process.env.CHAIN_ID_TESTNET_ARBITRUM)!,
+    },
+    linea_testnet: {
+      url: process.env.RPC_PROVIDER_TESTNET_LINEA!,
+      accounts: [process.env.PRIVATE_KEY!],
+      chainId: Number(process.env.CHAIN_ID_TESTNET_LINEA)!,
     },
   },
   etherscan: {
@@ -43,6 +49,7 @@ const config: HardhatUserConfig = {
       buildbear_polygon: "verifyContract",
       polygonMumbai: process.env.SCAN_API_KEY_MUMBAI!,
       arbitrum_sepolia: process.env.SCAN_API_KEY_TESTNET_ARBITRUM!,
+      linea_testnet: process.env.SCAN_API_KEY_TESTNET_LINEA!,
     },
     customChains: [
       {
@@ -72,7 +79,7 @@ const config: HardhatUserConfig = {
       },
       {
         network: "mumbai",
-        chainId: Number(process.env.CHAIN_ID_TESTNET_MUMBAI)!,
+        chainId: Number(process.env.CHAIN_ID_MUMBAI)!,
         urls: {
           apiURL: process.env.VERIFY_PROVIDER_MUMBAI!,
           browserURL: process.env.BROWSER_URL_PROVIDER_MUMBAI!,
@@ -84,6 +91,14 @@ const config: HardhatUserConfig = {
         urls: {
           apiURL: process.env.VERIFY_PROVIDER_TESTNET_ARBITRUM!,
           browserURL: process.env.BROWSER_URL_PROVIDER_TESTNET_ARBITRUM!,
+        },
+      },
+      {
+        network: "linea_testnet",
+        chainId: Number(process.env.CHAIN_ID_TESTNET_LINEA)!,
+        urls: {
+          apiURL: process.env.VERIFY_PROVIDER_TESTNET_LINEA!,
+          browserURL: process.env.BROWSER_URL_PROVIDER_TESTNET_LINEA!,
         },
       },
     ],

@@ -7,7 +7,6 @@ export const getOptions = async () => {
     executorGas,
     executorValue
   );
-  console.log({ _options });
   const formatedOptions = _options.toHex();
   return formatedOptions;
 };

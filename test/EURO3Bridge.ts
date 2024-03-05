@@ -58,7 +58,7 @@ describe("EURO3Bridge_MockUp", function () {
 
     const testingAddress = "0x6646805214327e5fa3bcA3E9ebd90F2d1198e075";
     const bridgeDestBytes32 = ethers.zeroPadValue(testingAddress, 32);
-    console.log({ bridgeDestBytes32 });
+
     await bridgeManager.updateDestChain(
       bridgeDestBytes32,
       chainDataTo.chainId,
@@ -74,7 +74,7 @@ describe("EURO3Bridge_MockUp", function () {
       executorGas,
       executorValue
     );
-    console.log({ _options });
+
     const formatedOptions = _options.toHex();
 
     return {
@@ -126,12 +126,11 @@ describe("EURO3Bridge_MockUp", function () {
         bridgeDestBytes32
       );
 
-      console.log({ isVerified });
       if (!isVerified) {
         console.log("Signature not verified ");
         return;
       }
-      console.log({ formatedOptions });
+
       const gasCalculation = await bridgeManager.quote(
         amount,
         chainDataTo.chainId,
@@ -139,7 +138,6 @@ describe("EURO3Bridge_MockUp", function () {
         formatedOptions,
         deployer.address
       );
-      console.log({ gasCalculation });
 
       const bridge = await bridgeManager.bridge(
         amount,
@@ -148,8 +146,7 @@ describe("EURO3Bridge_MockUp", function () {
         signature,
         { value: gasCalculation[0] }
       );
-
-      console.log(bridge);
+      await bridge.wait();
     });
   });
 });

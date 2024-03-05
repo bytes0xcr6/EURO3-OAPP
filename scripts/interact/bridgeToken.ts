@@ -1,14 +1,15 @@
 import { ethers } from "hardhat";
+import { getSignature } from "./../interact/getSignature";
+import { getOptions } from "../utils/getOptions";
 
 export async function bridgeToken(
   chainFrom: any,
   chainTo: any,
-  amount: string,
-  options: string,
-  signature: string
+  amount: string // It can be passed as normal number
 ) {
+  const formatedAmount = ethers.parseEther(amount).toString();
   console.log(
-    `\nBridging ${Number(amount) / 10 ** 18} EURO3 for chainIds: from ${
+    `\nBridging ${Number(amount)} EURO3 for chainIds: from ${
       chainFrom.chainId
     } to ${chainTo.chainId}\n`
   );
@@ -26,31 +27,46 @@ export async function bridgeToken(
     signer
   );
 
-  const approval = await EURO3.approve(BridgeManager.target, amount);
-  await approval.wait();
+  const allowance = await EURO3.allowance(signer.address, BridgeManager.target);
+  if (Number(allowance) < Number(formatedAmount)) {
+    const approval = await EURO3.approve(BridgeManager.target, formatedAmount);
+    await approval.wait();
+  }
 
-  console.log("Approved to bridge to manage EURO3");
+  const { signature, isVerified } = await getSignature(
+    chainFrom,
+    chainTo,
+    formatedAmount
+  );
 
-  const gasCalculation = await BridgeManager.quote(
-    amount,
+  const options = await getOptions();
+  console.log({ options });
+  console.log(
+    formatedAmount,
     chainTo.chainId,
     signature,
     options,
     signer.address
   );
-  console.log({ gasCalculation });
-
-  console.log(amount, chainTo.chainId, options, signature, {
-    value: gasCalculation[0],
-  });
+  const gasCalculation = await BridgeManager.quote(
+    formatedAmount,
+    chainTo.chainId,
+    signature,
+    options,
+    signer.address
+  );
+  console.log(gasCalculation);
   const bridge = await BridgeManager.bridge(
-    amount,
+    formatedAmount,
     chainTo.chainId,
     options,
     signature,
     { value: gasCalculation[0] }
   );
+  console.log("HERE");
 
-  await bridge.wait();
+  const receipt = await bridge.wait();
+
   console.log({ bridge });
+  console.log({ receipt });
 }
