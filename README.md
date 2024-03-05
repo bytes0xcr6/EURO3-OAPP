@@ -1,5 +1,6 @@
 # EURO3-OAPP
 
+
 The **BridgeManagerLZ** smart contract is designed to facilitate the seamless bridging of the EURO3 stable coin across different blockchain networks using Layer Zero infrastructure.
 
 ## Deployments
@@ -52,6 +53,8 @@ The **BridgeManagerLZ** smart contract is designed to facilitate the seamless br
 ## Introduction
 
 The **BridgeManagerLZ** smart contract is built on Layer Zero architecture, providing a robust solution for bridging EURO3 stable coins between different blockchain networks. This contract leverages the LayerZero messaging system to facilitate secure and efficient cross-chain transactions.
+
+![image](https://github.com/bonq-ch/BridgeManagerLZ-OAPP/assets/102038261/afd876fb-34ab-4e49-a15b-2f29ba1786b9)
 
 ## Features
 
