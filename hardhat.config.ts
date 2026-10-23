@@ -1,3 +1,4 @@
+import { loadPrivateKeys } from './security/foundry-keystore.js';
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 import "@nomicfoundation/hardhat-ignition-ethers";
@@ -16,29 +17,29 @@ const config: HardhatUserConfig = {
     },
     buildbear_eth: {
       url: process.env.RPC_PROVIDER_TESTNET_ETH!,
-      accounts: [process.env.PRIVATE_KEY!],
+      accounts: loadPrivateKeys("PRIVATE_KEY"),
     },
     buildbear_polygon: {
       url: process.env.RPC_PROVIDER_TESTNET_POLYGON_BUILDBEAR!,
-      accounts: [process.env.PRIVATE_KEY!],
+      accounts: loadPrivateKeys("PRIVATE_KEY"),
     },
     ethereum: {
       url: process.env.RPC_PROVIDER_MAINNET!,
-      accounts: [process.env.PRIVATE_KEY!],
+      accounts: loadPrivateKeys("PRIVATE_KEY"),
     },
     mumbai: {
       url: process.env.RPC_PROVIDER_MUMBAI,
-      accounts: [process.env.PRIVATE_KEY!],
+      accounts: loadPrivateKeys("PRIVATE_KEY"),
       chainId: Number(process.env.CHAIN_ID_MUMBAI)!,
     },
     arbitrum_sepolia: {
       url: process.env.RPC_PROVIDER_TESTNET_ARBITRUM!,
-      accounts: [process.env.PRIVATE_KEY!],
+      accounts: loadPrivateKeys("PRIVATE_KEY"),
       chainId: Number(process.env.CHAIN_ID_TESTNET_ARBITRUM)!,
     },
     linea_testnet: {
       url: process.env.RPC_PROVIDER_TESTNET_LINEA!,
-      accounts: [process.env.PRIVATE_KEY!],
+      accounts: loadPrivateKeys("PRIVATE_KEY"),
       chainId: Number(process.env.CHAIN_ID_TESTNET_LINEA)!,
     },
   },
