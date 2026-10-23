@@ -1,3 +1,5 @@
+> Operational signing now uses encrypted Foundry keystores. Follow [KEYSTORE_MIGRATION.md](KEYSTORE_MIGRATION.md); older raw private key environment instructions below are superseded.
+
 # EURO3-OAPP
 
 
